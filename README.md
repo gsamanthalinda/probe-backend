@@ -1,4 +1,4 @@
-# HERckers_Backend
+# Probe_Backend
 HERckers_Backend is a FastAPI-based backend service for managing a device and battery lifecycle ecosystem. It provides a RESTful API for user management, device tracking, battery registration, booking workflows, and sensor reading ingestion, tailored for organizations that operate across admin, recycler, and UPS company roles. The service connects to a PostgreSQL database via SQLAlchemy and includes support for migrations using Alembic.
 
 ## Overview
@@ -29,7 +29,7 @@ When the application is running, interactive API documentation is available at S
 
 ## Project Structure
 
-HERckers_Backend/
+Probe_Backend/
 ├── main.py                 # Application entry point, middleware, and router registration
 ├── database.py             # Database engine, session factory, and base model
 ├── requirements.txt        # Python dependencies
