@@ -1,0 +1,104 @@
+import os
+from fastapi import FastAPI, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
+from probe.rate_limiter import limiter, RateLimitExceeded, _rate_limit_exceeded_handler
+from probe.routers import user_router, device_router, battery_router, booking_router, sensor_reading_router
+import probe.models as models
+from database import Base, engine
+
+
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI(
+    title="probe API",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+)
+
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+env_hosts = os.getenv("ALLOWED_HOSTS")
+if env_hosts:
+    allowed_hosts_list = [h.strip() for h in env_hosts.split(",")]
+else:
+  
+    if os.getenv("PORT") or os.getenv("HEROKU_APP_NAME"):
+        allowed_hosts_list = ["*"]
+    else:
+        allowed_hosts_list = [
+            "localhost",
+            "127.0.0.1",
+            "*.localhost",
+        ]
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=allowed_hosts_list,
+)
+
+cors_env = os.getenv("CORS_ORIGINS")
+if cors_env:
+    origins = [o.strip() for o in cors_env.split(",")]
+else:
+    origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    if os.getenv("PORT") or os.getenv("HEROKU_APP_NAME"):
+        origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["X-2FA-Required"],
+    max_age=600,
+)
+
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "An internal server error occurred."},
+    )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    return response
+
+
+@app.middleware("http")
+async def limit_request_size(request: Request, call_next):
+    if request.headers.get("content-length"):
+        content_length = int(request.headers["content-length"])
+        if content_length > 1024 * 1024:
+            return JSONResponse(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                content={"detail": "Request too large. Maximum size is 1MB."},
+            )
+    return await call_next(request)
+
+
+app.include_router(user_router)
+app.include_router(booking_router)
+app.include_router(battery_router)
+app.include_router(device_router)
+app.include_router(sensor_reading_router)
